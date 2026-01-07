@@ -20,6 +20,24 @@ function App() {
         return () => unsub();
     }, []);
 
+    // Periodically enrich packets with Geo-IP data
+    useEffect(() => {
+        if (packets.length > 0 && isSniffing) {
+            const interval = setInterval(() => {
+                // Re-enrich packets every 5 seconds to update location data
+                GetSecurityAnalysis([], packets).then(res => {
+                    if (res && res.enriched_packets && res.enriched_packets.length > 0) {
+                        setPackets(res.enriched_packets);
+                    }
+                    if (res && res.findings && res.findings.length > 0) {
+                        setAnalysis(prev => [...prev, ...res.findings]);
+                    }
+                }).catch(err => console.error("Periodic enrichment error:", err));
+            }, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [packets.length, isSniffing]);
+
     function toggleSniff() {
         StartLiveSniffing();
         setIsSniffing(true);
@@ -44,10 +62,15 @@ function App() {
                 ScanDevicePorts(foundDevices[0].ip).then(ports => {
                     console.log("Ports found:", ports);
                     if (ports && ports.length > 0) {
-                        GetSecurityAnalysis(ports, []).then(res => {
+                        // Pass current packets to get them enriched with Geo-IP
+                        GetSecurityAnalysis(ports, packets).then(res => {
                             console.log("Analysis result:", res);
                             if (res && res.findings) {
                                 setAnalysis(res.findings);
+                            }
+                            // Update packets with enriched data (location etc)
+                            if (res && res.enriched_packets && res.enriched_packets.length > 0) {
+                                setPackets(res.enriched_packets);
                             }
                         }).catch(err => console.error("Analysis error:", err));
                     } else {
@@ -68,16 +91,18 @@ function App() {
         setAnalysis([]);
         
         ScanDevicePorts(ip).then(ports => {
-            if(ports.length > 0) {
+            if(ports && ports.length > 0) {
                 GetSecurityAnalysis(ports, packets).then(res => {
-                    setAnalysis(res.findings);
+                    if (res && res.findings) {
+                        setAnalysis(res.findings);
+                    }
                     // Update packets with enriched data (location etc)
-                    if (res.enriched_packets && res.enriched_packets.length > 0) {
+                    if (res && res.enriched_packets && res.enriched_packets.length > 0) {
                         setPackets(res.enriched_packets);
                     }
-                });
+                }).catch(err => console.error("Analysis error:", err));
             }
-        });
+        }).catch(err => console.error("Port scan error:", err));
     }
 
     const chartData = () => {

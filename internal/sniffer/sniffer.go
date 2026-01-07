@@ -34,12 +34,24 @@ func StartSniffing(deviceName string, packetChan chan PacketInfo) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	
 	for packet := range packetSource.Packets() {
-		// Ambil layer Network (IP)
+		// Ambil layer Network (IP) - support both IPv4 and IPv6
+		var srcIP, dstIP string
+		
 		ipLayer := packet.Layer(layers.LayerTypeIPv4)
-		if ipLayer == nil {
-			continue
+		if ipLayer != nil {
+			ip, _ := ipLayer.(*layers.IPv4)
+			srcIP = ip.SrcIP.String()
+			dstIP = ip.DstIP.String()
+		} else {
+			// Try IPv6
+			ip6Layer := packet.Layer(layers.LayerTypeIPv6)
+			if ip6Layer == nil {
+				continue // Skip if neither IPv4 nor IPv6
+			}
+			ip6, _ := ip6Layer.(*layers.IPv6)
+			srcIP = ip6.SrcIP.String()
+			dstIP = ip6.DstIP.String()
 		}
-		ip, _ := ipLayer.(*layers.IPv4)
 
 		// Ambil info protokol transport
 		proto := "OTHER"
@@ -49,26 +61,26 @@ func StartSniffing(deviceName string, packetChan chan PacketInfo) {
 			proto = "UDP"
 		} else if packet.Layer(layers.LayerTypeICMPv4) != nil {
 			proto = "ICMP"
+		} else if packet.Layer(layers.LayerTypeICMPv6) != nil {
+			proto = "ICMPv6"
 		}
 
 		// Ambil payload (Application Layer)
-		// opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 		payload := ""
 		if appLayer := packet.ApplicationLayer(); appLayer != nil {
 			payload = string(appLayer.Payload())
 		}
-		// If payload is empty but we want to see something for testing, maybe just use hex dump or skip?
-		// For now let's keep it simple.
 
 		// Kirim data ke channel
 		packetChan <- PacketInfo{
 			Timestamp: time.Now().Format("15:04:05.000"),
-			Source:    ip.SrcIP.String(),
-			Dest:      ip.DstIP.String(),
+			Source:    srcIP,
+			Dest:      dstIP,
 			Protocol:  proto,
 			Length:    packet.Metadata().Length,
-			Info:      fmt.Sprintf("%s -> %s", ip.SrcIP, ip.DstIP),
+			Info:      fmt.Sprintf("%s -> %s", srcIP, dstIP),
 			Payload:   payload,
+			Location:  "", // Will be enriched by Python analyzer
 		}
 	}
 }
