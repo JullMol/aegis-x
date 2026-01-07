@@ -52,10 +52,26 @@ func ScanPorts(ip string) []PortResult {
 }
 
 func GetLocalIP() (net.IP, string, string, error) {
+	// Method 1: Connect ke external IP untuk menemukan interface yang benar
+	// Ini adalah cara paling akurat untuk menemukan interface internet
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err == nil {
+		defer conn.Close()
+		localAddr := conn.LocalAddr().(*net.UDPAddr)
+		fmt.Println("[Scanner] Detected internet interface IP:", localAddr.IP.String())
+		return localAddr.IP, "internet", "internet", nil
+	}
+
+	fmt.Println("[Scanner] Could not detect via outbound connection, falling back...")
+
+	// Method 2: Fallback - cari interface dengan IP 192.168.x.x (bukan 192.168.137.x yang biasanya Mobile Hotspot)
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, "", "", err
 	}
+
+	var fallbackIP net.IP
+	var fallbackName string
 
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
@@ -76,9 +92,41 @@ func GetLocalIP() (net.IP, string, string, error) {
 				continue
 			}
 
-			return ip, iface.Name, iface.Name, nil
+			ipStr := ip.String()
+
+			// Skip Mobile Hotspot / ICS interface (biasanya 192.168.137.x)
+			if strings.HasPrefix(ipStr, "192.168.137.") {
+				fmt.Println("[Scanner] Skipping Mobile Hotspot interface:", ipStr)
+				continue
+			}
+
+			// Skip WSL/Hyper-V interfaces (biasanya 172.x.x.x)
+			if strings.HasPrefix(ipStr, "172.") {
+				fmt.Println("[Scanner] Skipping WSL/Hyper-V interface:", ipStr)
+				fallbackIP = ip
+				fallbackName = iface.Name
+				continue
+			}
+
+			// Prioritas: 192.168.x.x (bukan 137) atau 10.x.x.x
+			if strings.HasPrefix(ipStr, "192.168.") || strings.HasPrefix(ipStr, "10.") {
+				fmt.Println("[Scanner] Found main network interface:", ipStr)
+				return ip, iface.Name, iface.Name, nil
+			}
+
+			// Simpan sebagai fallback
+			if fallbackIP == nil {
+				fallbackIP = ip
+				fallbackName = iface.Name
+			}
 		}
 	}
+
+	if fallbackIP != nil {
+		fmt.Println("[Scanner] Using fallback interface:", fallbackIP.String())
+		return fallbackIP, fallbackName, fallbackName, nil
+	}
+
 	return nil, "", "", fmt.Errorf("tidak ada interface aktif")
 }
 

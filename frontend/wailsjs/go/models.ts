@@ -3,7 +3,9 @@ export namespace bridge {
 	export class SecurityFinding {
 	    port: number;
 	    risk: string;
+	    type?: string;
 	    summary: string;
+	    detail?: string;
 	    action: string;
 	
 	    static createFrom(source: any = {}) {
@@ -14,7 +16,9 @@ export namespace bridge {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.port = source["port"];
 	        this.risk = source["risk"];
+	        this.type = source["type"];
 	        this.summary = source["summary"];
+	        this.detail = source["detail"];
 	        this.action = source["action"];
 	    }
 	}
@@ -95,7 +99,9 @@ export namespace sniffer {
 	export class PacketInfo {
 	    timestamp: string;
 	    source: string;
+	    src_port: number;
 	    dest: string;
+	    dst_port: number;
 	    protocol: string;
 	    length: number;
 	    info: string;
@@ -110,7 +116,9 @@ export namespace sniffer {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.timestamp = source["timestamp"];
 	        this.source = source["source"];
+	        this.src_port = source["src_port"];
 	        this.dest = source["dest"];
+	        this.dst_port = source["dst_port"];
 	        this.protocol = source["protocol"];
 	        this.length = source["length"];
 	        this.info = source["info"];

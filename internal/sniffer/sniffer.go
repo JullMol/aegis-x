@@ -13,7 +13,9 @@ import (
 type PacketInfo struct {
 	Timestamp string `json:"timestamp"`
 	Source    string `json:"source"`
+	SrcPort   int    `json:"src_port"`
 	Dest      string `json:"dest"`
+	DstPort   int    `json:"dst_port"`
 	Protocol  string `json:"protocol"`
 	Length    int    `json:"length"`
 	Info      string `json:"info"`
@@ -22,17 +24,34 @@ type PacketInfo struct {
 }
 
 func StartSniffing(deviceName string, packetChan chan PacketInfo) {
-	// Memuka device untuk sniffing
-	// 1600 adalah snaplen (ukuran paket), true adalah promiscuous mode
-	handle, err := pcap.OpenLive(deviceName, 1600, true, pcap.BlockForever)
+	fmt.Println("[Sniffer] Opening device:", deviceName)
+
+	// Membuka device untuk sniffing
+	// 65535 adalah snaplen max, true adalah promiscuous mode
+	// Timeout 1 second - tidak terlalu lama tapi cukup untuk buffer
+	handle, err := pcap.OpenLive(deviceName, 65535, true, time.Second)
 	if err != nil {
-		fmt.Printf("Gagal membuka device: %v\n", err)
+		fmt.Printf("[Sniffer] ERROR: Gagal membuka device: %v\n", err)
 		return
 	}
 	defer handle.Close()
 
+	fmt.Println("[Sniffer] Device opened successfully!")
+	fmt.Println("[Sniffer] Link type:", handle.LinkType())
+
+	// BPF Filter: Hanya TCP dan UDP (skip ICMP noise)
+	// Uncomment jika ingin filter
+	err = handle.SetBPFFilter("ip")
+	if err != nil {
+		fmt.Printf("[Sniffer] Warning: BPF filter failed: %v\n", err)
+	} else {
+		fmt.Println("[Sniffer] BPF filter 'ip' applied successfully")
+	}
+
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	
+
+	packetCount := 0
+	fmt.Println("[Sniffer] Starting packet capture loop...")
 	for packet := range packetSource.Packets() {
 		// Ambil layer Network (IP) - support both IPv4 and IPv6
 		var srcIP, dstIP string
@@ -53,12 +72,20 @@ func StartSniffing(deviceName string, packetChan chan PacketInfo) {
 			dstIP = ip6.DstIP.String()
 		}
 
-		// Ambil info protokol transport
+		// Ambil info protokol transport dan port
 		proto := "OTHER"
-		if packet.Layer(layers.LayerTypeTCP) != nil {
+		var srcPort, dstPort int
+
+		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			proto = "TCP"
-		} else if packet.Layer(layers.LayerTypeUDP) != nil {
+			tcp, _ := tcpLayer.(*layers.TCP)
+			srcPort = int(tcp.SrcPort)
+			dstPort = int(tcp.DstPort)
+		} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 			proto = "UDP"
+			udp, _ := udpLayer.(*layers.UDP)
+			srcPort = int(udp.SrcPort)
+			dstPort = int(udp.DstPort)
 		} else if packet.Layer(layers.LayerTypeICMPv4) != nil {
 			proto = "ICMP"
 		} else if packet.Layer(layers.LayerTypeICMPv6) != nil {
@@ -72,13 +99,20 @@ func StartSniffing(deviceName string, packetChan chan PacketInfo) {
 		}
 
 		// Kirim data ke channel
+		packetCount++
+		if packetCount <= 5 || packetCount%50 == 0 {
+			fmt.Printf("[Sniffer] Packet #%d: %s -> %s (%s)\n", packetCount, srcIP, dstIP, proto)
+		}
+		
 		packetChan <- PacketInfo{
 			Timestamp: time.Now().Format("15:04:05.000"),
 			Source:    srcIP,
+			SrcPort:   srcPort,
 			Dest:      dstIP,
+			DstPort:   dstPort,
 			Protocol:  proto,
 			Length:    packet.Metadata().Length,
-			Info:      fmt.Sprintf("%s -> %s", srcIP, dstIP),
+			Info:      fmt.Sprintf("%s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort),
 			Payload:   payload,
 			Location:  "", // Will be enriched by Python analyzer
 		}
