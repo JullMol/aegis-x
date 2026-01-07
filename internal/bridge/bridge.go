@@ -3,6 +3,7 @@ package bridge
 import (
 	"encoding/json"
 	"os/exec"
+	"syscall"
 )
 
 type SecurityFinding struct {
@@ -24,6 +25,7 @@ func AnalyzeWithPython(portsData interface{}, packetsData interface{}) (Analysis
 	packetsJson, _ := json.Marshal(packetsData)
 
 	cmd := exec.Command("python", "scripts/analyzer.py", string(portsJson), string(packetsJson))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.CombinedOutput()
 
 	if err != nil {
